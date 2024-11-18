@@ -1,0 +1,15 @@
+{
+  "files": {
+    "main.css": "/cd-tracker/static/css/main.211872e6.css",
+    "main.js": "/cd-tracker/static/js/main.d868f877.js",
+    "static/js/453.00c0bc93.chunk.js": "/cd-tracker/static/js/453.00c0bc93.chunk.js",
+    "index.html": "/cd-tracker/index.html",
+    "main.211872e6.css.map": "/cd-tracker/static/css/main.211872e6.css.map",
+    "main.d868f877.js.map": "/cd-tracker/static/js/main.d868f877.js.map",
+    "453.00c0bc93.chunk.js.map": "/cd-tracker/static/js/453.00c0bc93.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.211872e6.css",
+    "static/js/main.d868f877.js"
+  ]
+}
