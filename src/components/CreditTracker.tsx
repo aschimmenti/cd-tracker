@@ -1,9 +1,20 @@
 import React, { useState, useEffect } from 'react';
 
+interface ActivityEntry {
+  title: string;
+  dateFrom: string;
+  dateTo?: string;
+  classroom: number;
+  autonomous: number;
+  days?: number;
+  type: string;
+}
+
 interface Activity {
   classroom: number;
   autonomous: number;
   days?: number;
+  entries: ActivityEntry[];
 }
 
 interface ActivityData {
@@ -18,15 +29,34 @@ interface ActivityData {
 
 const CreditTracker: React.FC = () => {
   const [activities, setActivities] = useState<Record<string, Activity>>({
-    courses: { classroom: 0, autonomous: 0 },
-    seminars: { classroom: 0, autonomous: 0 },
-    labs: { classroom: 0, autonomous: 0 },
-    transversal: { classroom: 0, autonomous: 0 },
-    teaching: { classroom: 0, autonomous: 0 },
-    tutoring: { classroom: 0, autonomous: 0 },
-    extraCurricular: { classroom: 0, autonomous: 0, days: 0 },
-    dissemination: { classroom: 0, autonomous: 0, days: 0 },
+    courses: { classroom: 0, autonomous: 0, entries: [] },
+    seminars: { classroom: 0, autonomous: 0, entries: [] },
+    labs: { classroom: 0, autonomous: 0, entries: [] },
+    transversal: { classroom: 0, autonomous: 0, entries: [] },
+    teaching: { classroom: 0, autonomous: 0, entries: [] },
+    tutoring: { classroom: 0, autonomous: 0, entries: [] },
+    extraCurricular: { classroom: 0, autonomous: 0, days: 0, entries: [] },
+    dissemination: { classroom: 0, autonomous: 0, days: 0, entries: [] },
   });
+
+  const [currentEntry, setCurrentEntry] = useState<{
+    type: string;
+    title: string;
+    dateFrom: string;
+    dateTo: string;
+    classroom: number;
+    autonomous: number;
+    days: number;
+  }>({
+    type: '',
+    title: '',
+    dateFrom: '',
+    dateTo: '',
+    classroom: 0,
+    autonomous: 0,
+    days: 0,
+  });
+
 
   const activityDefinitions: Record<string, ActivityData> = {
     courses: {
@@ -82,8 +112,7 @@ const CreditTracker: React.FC = () => {
       creditPerDay: 0.5
     }
   };
-
-  useEffect(() => {
+ useEffect(() => {
     const saved = localStorage.getItem('doctoralActivities');
     if (saved) {
       setActivities(JSON.parse(saved));
@@ -99,24 +128,122 @@ const CreditTracker: React.FC = () => {
     if (def.isDays) {
       return (activity.days || 0) * (def.creditPerDay || 0);
     } else {
-      const completedUnits = Math.floor(
-        Math.min(
-          activity.classroom / (def.classroomHours || 1), 
-          activity.autonomous / (def.autonomousHours || 1)
-        )
-      );
-      return completedUnits * (def.creditPerUnit || 0);
+      // Calculate exact units for each type of hours
+      const classroomUnits = activity.classroom / (def.classroomHours || 1);
+      const autonomousUnits = activity.autonomous / (def.autonomousHours || 1);
+      
+      // Take the minimum number of completed units (including partial)
+      const completedUnits = Math.min(classroomUnits, autonomousUnits);
+      
+      // Return with 1 decimal precision
+      return Math.round((completedUnits * (def.creditPerUnit || 0)) * 10) / 10;
     }
   };
 
-  const handleInputChange = (type: string, field: string, value: string) => {
-    setActivities(prev => ({
-      ...prev,
-      [type]: {
-        ...prev[type],
-        [field]: parseFloat(value) || 0
-      }
-    }));
+  const handleEntrySubmit = (type: string) => {
+    if (!currentEntry.title || !currentEntry.dateFrom) return;
+  
+    const newEntry: ActivityEntry = {
+      title: currentEntry.title,
+      dateFrom: currentEntry.dateFrom,
+      dateTo: currentEntry.dateTo || undefined,
+      classroom: currentEntry.classroom,
+      autonomous: currentEntry.autonomous,
+      days: currentEntry.days,
+      type
+    };
+  
+    setActivities(prev => {
+      // Get existing entries for this type
+      const existingEntries = prev[type].entries || [];
+      
+      // Calculate new totals
+      const newClassroomTotal = existingEntries.reduce((sum, entry) => sum + (entry.classroom || 0), 0) + (newEntry.classroom || 0);
+      const newAutonomousTotal = existingEntries.reduce((sum, entry) => sum + (entry.autonomous || 0), 0) + (newEntry.autonomous || 0);
+      const newDaysTotal = existingEntries.reduce((sum, entry) => sum + (entry.days || 0), 0) + (newEntry.days || 0);
+  
+      return {
+        ...prev,
+        [type]: {
+          classroom: newClassroomTotal,
+          autonomous: newAutonomousTotal,
+          days: newDaysTotal,
+          entries: [...existingEntries, newEntry]  // Append new entry to existing ones
+        }
+      };
+    });
+  
+    // Reset current entry
+    setCurrentEntry({
+      type: '',
+      title: '',
+      dateFrom: '',
+      dateTo: '',
+      classroom: 0,
+      autonomous: 0,
+      days: 0,
+    });
+  };
+
+  const deleteEntry = (type: string, indexToDelete: number) => {
+    setActivities(prev => {
+      const updatedEntries = prev[type].entries.filter((_, index) => index !== indexToDelete);
+      
+      // Recalculate totals after deletion
+      const newClassroomTotal = updatedEntries.reduce((sum, entry) => sum + (entry.classroom || 0), 0);
+      const newAutonomousTotal = updatedEntries.reduce((sum, entry) => sum + (entry.autonomous || 0), 0);
+      const newDaysTotal = updatedEntries.reduce((sum, entry) => sum + (entry.days || 0), 0);
+  
+      return {
+        ...prev,
+        [type]: {
+          classroom: newClassroomTotal,
+          autonomous: newAutonomousTotal,
+          days: newDaysTotal,
+          entries: updatedEntries
+        }
+      };
+    });
+  };
+
+  const exportToCSV = () => {
+    // CSV Header
+    let csvContent = "Type,Title,Date From,Date To,Classroom Hours,Autonomous Hours,Days,Credits\n";
+    
+    Object.entries(activities).forEach(([type, activity]) => {
+      activity.entries.forEach(entry => {
+        // Combine type and title with a comma but wrap in quotes
+        const typeAndTitle = `${type},${entry.title}`;
+        
+        // Format each entry as a CSV row
+        const row = [
+          typeAndTitle,                      // Type,Title as one field
+          entry.dateFrom,                    // Date From
+          entry.dateTo || '',                // Date To
+          Math.round(entry.classroom || 0),  // Classroom Hours (no decimals)
+          Math.round(entry.autonomous || 0), // Autonomous Hours (no decimals)
+          entry.days || '',                  // Days
+          calculateCredits(type, {           // Credits
+            classroom: entry.classroom || 0,
+            autonomous: entry.autonomous || 0,
+            days: entry.days || 0,
+            entries: []
+          })
+        ].join(',');
+  
+        csvContent += row + '\n';
+      });
+    });
+  
+    // Create and trigger download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.href = url;
+    link.setAttribute('download', 'doctoral_credits.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const totalTrainingCredits = Object.entries(activities).reduce(
@@ -124,99 +251,202 @@ const CreditTracker: React.FC = () => {
     0
   );
 
-  const totalCredits = totalTrainingCredits + 140; // 140 fixed research credits
+  const totalCredits = totalTrainingCredits + 140;
 
   return (
-    <div className="container mx-auto p-4 max-w-4xl">
-      <h1 className="text-2xl font-bold mb-6">Doctoral Credits Tracker</h1>
-      
-      <div className="bg-white p-4 rounded-lg shadow mb-6">
-        <div className="mb-4">
-          <div className="flex justify-between mb-1">
-            <span>Training Credits: {totalTrainingCredits.toFixed(1)}/40</span>
-            <span>{Math.min((totalTrainingCredits/40)*100, 100).toFixed(1)}%</span>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div>
+        <h1 className="text-3xl font-bold text-gray-900 mb-8">Doctoral Credits Tracker</h1>
+
+      <div className="progress-section">
+        <div className="mb-6">
+          <div className="flex justify-between mb-2">
+            <span className="text-sm font-medium">Training Credits: {totalTrainingCredits.toFixed(1)}/40 ({(totalTrainingCredits/40*100).toFixed(1)}%)</span>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-2">
+          <div className="progress-bar">
             <div 
-              className="bg-blue-600 h-2 rounded-full transition-all" 
-              style={{width: `${Math.min((totalTrainingCredits/40)*100, 100)}%`}}
+              className="progress-fill"
+              style={{ width: `${Math.min((totalTrainingCredits/40)*100, 100)}%` }}
             />
           </div>
         </div>
         
         <div>
-          <div className="flex justify-between mb-1">
-            <span>Total Credits: {totalCredits.toFixed(1)}/180</span>
-            <span>{Math.min((totalCredits/180)*100, 100).toFixed(1)}%</span>
+          <div className="flex justify-between mb-2">
+            <span className="text-sm font-medium">Total Credits: {totalCredits.toFixed(1)}/180 ({(totalCredits/180*100).toFixed(1)}%)</span>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-2">
+          <div className="progress-bar">
             <div 
-              className="bg-green-600 h-2 rounded-full transition-all" 
-              style={{width: `${Math.min((totalCredits/180)*100, 100)}%`}}
+              className="progress-fill"
+              style={{ width: `${Math.min((totalCredits/180)*100, 100)}%` }}
             />
           </div>
         </div>
       </div>
-
       {Object.entries(activityDefinitions).map(([type, def]) => (
-        <div key={type} className="bg-white p-4 rounded-lg shadow mb-4">
-          <h3 className="font-semibold mb-2">{def.name}</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div key={type} className="activity-card">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">{def.name}</h3>
+            
+            <div className="input-group">
+              <label className="input-label">Title:</label>
+              <input
+                type="text"
+                value={currentEntry.type === type ? currentEntry.title : ''}
+                onChange={(e) => setCurrentEntry(prev => ({
+                  ...prev,
+                  type,
+                  title: e.target.value
+                }))}
+                className="input-field"
+                placeholder="Activity title"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="input-group">
+                <label className="input-label">From:</label>
+                <input
+                  type="date"
+                  value={currentEntry.type === type ? currentEntry.dateFrom : ''}
+                  onChange={(e) => setCurrentEntry(prev => ({
+                    ...prev,
+                    type,
+                    dateFrom: e.target.value
+                  }))}
+                  className="input-field"
+                />
+              </div>
+              <div className="input-group">
+                <label className="input-label">To (optional):</label>
+                <input
+                  type="date"
+                  value={currentEntry.type === type ? currentEntry.dateTo : ''}
+                  onChange={(e) => setCurrentEntry(prev => ({
+                    ...prev,
+                    type,
+                    dateTo: e.target.value
+                  }))}
+                  className="input-field"
+                />
+              </div>
+            </div>
+
             {def.isDays ? (
-              <div>
-                <label className="block text-sm mb-1">Days attended:</label>
+              <div className="input-group">
+                <label className="input-label">Days attended:</label>
                 <input
                   type="number"
                   min="0"
                   step="1"
-                  value={activities[type].days || 0}
-                  onChange={(e) => handleInputChange(type, 'days', e.target.value)}
-                  className="border rounded px-2 py-1 w-24"
+                  value={currentEntry.type === type ? currentEntry.days : 0}
+                  onChange={(e) => setCurrentEntry(prev => ({
+                    ...prev,
+                    type,
+                    days: Number(e.target.value)
+                  }))}
+                  className="input-field"
                 />
               </div>
             ) : (
               <>
-                <div>
-                  <label className="block text-sm mb-1">
+                <div className="input-group">
+                  <label className="input-label">
                     Classroom hours (required: {def.classroomHours}h/unit):
                   </label>
                   <input
                     type="number"
                     min="0"
                     step="1"
-                    value={activities[type].classroom}
-                    onChange={(e) => handleInputChange(type, 'classroom', e.target.value)}
-                    className="border rounded px-2 py-1 w-24"
+                    value={currentEntry.type === type ? currentEntry.classroom : 0}
+                    onChange={(e) => setCurrentEntry(prev => ({
+                      ...prev,
+                      type,
+                      classroom: Number(e.target.value)
+                    }))}
+                    className="input-field"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm mb-1">
+                <div className="input-group">
+                  <label className="input-label">
                     Autonomous study (required: {def.autonomousHours}h/unit):
                   </label>
                   <input
                     type="number"
                     min="0"
                     step="1"
-                    value={activities[type].autonomous}
-                    onChange={(e) => handleInputChange(type, 'autonomous', e.target.value)}
-                    className="border rounded px-2 py-1 w-24"
+                    value={currentEntry.type === type ? currentEntry.autonomous : 0}
+                    onChange={(e) => setCurrentEntry(prev => ({
+                      ...prev,
+                      type,
+                      autonomous: Number(e.target.value)
+                    }))}
+                    className="input-field"
                   />
                 </div>
               </>
             )}
-            <div>
-              <label className="block text-sm mb-1">Credits earned:</label>
-              <strong>{calculateCredits(type, activities[type]).toFixed(1)} CD</strong>
+            
+            <button
+              onClick={() => handleEntrySubmit(type)}
+              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              Add Entry
+            </button>
+
+            <div className="credits-display">
+              Total Credits: {calculateCredits(type, activities[type]).toFixed(1)} CD
             </div>
           </div>
-        </div>
-      ))}
+        ))}
 
-      {totalTrainingCredits > 40 && (
-        <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mt-4">
-          Warning: Training credits exceed maximum of 40 CD
-        </div>
-      )}
+        <button
+          onClick={exportToCSV}
+          className="mt-4 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+        >
+          Export to CSV
+        </button>
+      </div>
+
+      {/* Activity cards column */}
+{/* Activity cards column */}
+<div className="bg-gray-50 p-4 rounded-lg">
+  <h2 className="text-xl font-semibold mb-4">Activity Entries</h2>
+  {Object.entries(activities).map(([type, activity]) => (
+    activity.entries.map((entry, index) => (
+      <div key={`${type}-${index}`} className="bg-white rounded-lg shadow p-4 mb-4 relative">
+        <button
+          onClick={() => deleteEntry(type, index)}
+          className="absolute top-2 right-2 text-red-600 hover:text-red-800"
+        >
+          ×
+        </button>
+        <h3 className="font-semibold text-lg">{entry.title}</h3>
+        <p className="text-sm text-gray-600">
+          Type: {activityDefinitions[type].name}
+        </p>
+        <p className="text-sm text-gray-600">
+          Date: {entry.dateFrom} {entry.dateTo ? `to ${entry.dateTo}` : ''}
+        </p>
+        {activityDefinitions[type].isDays ? (
+          <p className="text-sm text-gray-600">Days: {entry.days}</p>
+        ) : (
+          <>
+            <p className="text-sm text-gray-600">Classroom: {entry.classroom}h</p>
+            <p className="text-sm text-gray-600">Autonomous: {entry.autonomous}h</p>
+          </>
+        )}
+        <p className="text-sm font-semibold mt-2">
+          Credits: {calculateCredits(type, {
+            classroom: entry.classroom || 0,
+            autonomous: entry.autonomous || 0,
+            days: entry.days || 0,
+            entries: []
+          }).toFixed(1)} CD
+        </p>
+      </div>
+    ))
+  ))}
+</div>
     </div>
   );
 };
